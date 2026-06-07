@@ -16,7 +16,7 @@ jellyfinHeaders = {
     "Content-Type": "application/json"
 }
 try:
-    response = requests.get(f"{os.getenv("JELLYFIN_URL")}/System/Info", headers=jellyfinHeaders)
+    response = requests.get(f"{os.getenv('JELLYFIN_URL')}/System/Info", headers=jellyfinHeaders)
     response.raise_for_status()
 
 except exception as e:

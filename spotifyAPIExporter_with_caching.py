@@ -8,6 +8,11 @@ import requests
 import logging
 import time
 import pickle
+import hashlib
+import json
+
+CACHE_DIR = "cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
 
 load_dotenv()
 if not os.getenv("SPOTIPY_CLIENT_ID") or not os.getenv("SPOTIPY_CLIENT_SECRET") or not os.getenv("SPOTIPY_REDIRECT_URI"):
@@ -21,7 +26,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def api_call(api_func, *args, **kwargs):
+def _cache_key(func_name, args, kwargs):
+    raw = {
+        "func": func_name,
+        "args": args,
+        "kwargs": kwargs
+    }
+    encoded = json.dumps(raw, sort_keys=True, default=str).encode()
+    return hashlib.md5(encoded).hexdigest()
+
+
+def cached_api_call(api_func, *args, **kwargs):
+    key = _cache_key(api_func.__name__, args, kwargs)
+    path = os.path.join(CACHE_DIR, f"{key}.pkl")
+
+    if os.path.exists(path):
+        with open(path, "rb") as f:
+            return pickle.load(f)
+
+    result = cached_api_call(api_func, *args, **kwargs)
+
+    with open(path, "wb") as f:
+        pickle.dump(result, f)
+
+    return result
+
+def cached_api_call(api_func, *args, **kwargs):
     @retry(
         stop=stop_after_attempt(10),
         wait=wait_exponential(multiplier=1, min=30, max=300),
@@ -49,22 +79,22 @@ albums = {}
 
 playlists = {}
 print("fetching playlistIDs ...")
-total_playlists = (int)(api_call(sp.current_user_playlists,limit=50, offset=0)['total'])
+total_playlists = (int)(cached_api_call(sp.current_user_playlists,limit=50, offset=0)['total'])
 print(f"    total: {total_playlists}")
 playlistsIDs = []
 for x in range(0,total_playlists,50):
-    playlistsIDs += api_call(sp.current_user_playlists,limit=50, offset=x)['items']
+    playlistsIDs += cached_api_call(sp.current_user_playlists,limit=50, offset=x)['items']
 
 print("fetching playlist contents ...")
 for i, playlist in enumerate(playlistsIDs):
-    basicData = api_call(sp.playlist,playlist['id'])
+    basicData = cached_api_call(sp.playlist,playlist['id'])
 
     allSongs = []
     if 'items' in basicData:
         allSongs = [record['item'] for record in basicData['items']['items']]
         if basicData['items']['total'] > 100:
             for x in range(100, basicData['items']['total'], 50):
-                allSongs += [record['item'] for record in api_call(sp.playlist_items, playlist['id'], offset=x)['items']]
+                allSongs += [record['item'] for record in cached_api_call(sp.playlist_items, playlist['id'], offset=x)['items']]
     else:
         # collaborative playlists don't allow for fetching the song list if not collaborator; skipping these
         # with funky logic, bc for whatever reason in testing the API returned "collaborative=False" for playlists
@@ -81,11 +111,11 @@ for i, playlist in enumerate(playlistsIDs):
 
     print(f"    ({i+1}/{total_playlists}) {playlist['id']} ... done")
 
-likedSongs = api_call(sp.current_user_saved_tracks, limit=50)
+likedSongs = cached_api_call(sp.current_user_saved_tracks, limit=50)
 allLikedSongs = [record['track'] for record in likedSongs['items']]
 if likedSongs['total'] > 100:
     for x in range(50, likedSongs['total'], 50):
-        allLikedSongs += [record['track'] for record in api_call(sp.current_user_saved_tracks, offset=x, limit=50)['items']]
+        allLikedSongs += [record['track'] for record in cached_api_call(sp.current_user_saved_tracks, offset=x, limit=50)['items']]
 playlists['likedSongs'] = {
     "name": "liked songs",
     "songs": allLikedSongs
@@ -129,11 +159,11 @@ for playlist in playlists:
             }
 
 print("fetching followed artists ...")
-totalArtists = (api_call(sp.current_user_followed_artists, limit=20, after=None)['artists']['total'])
+totalArtists = (cached_api_call(sp.current_user_followed_artists, limit=20, after=None)['artists']['total'])
 artists = []
 for x in range(0,totalArtists,20):
     print(f"    ({x}/{totalArtists})")
-    artists += api_call(sp.current_user_followed_artists, limit=20, after=x)['artists']['items']
+    artists += cached_api_call(sp.current_user_followed_artists, limit=20, after=x)['artists']['items']
 print(f"    ({totalArtists}/{totalArtists})")
 
 print("fetching artists albums")
@@ -143,13 +173,13 @@ for artist in artists:
     time.sleep(0.5)
     print(f"    ({i}/{total}) {artist['name']}")
     i=i+1
-    req = api_call(sp.artist_albums, artist['id'], limit=10, include_groups='album, single, compilation')
+    req = cached_api_call(sp.artist_albums, artist['id'], limit=10, include_groups='album, single, compilation')
     artistAlbums = req['items']
     if req['total'] > 10:
         totalAlbums = req['total']
         currentLimit = req['limit']
         for x in range(currentLimit, totalAlbums, currentLimit):
-            artistAlbums += [album for album in api_call(sp.artist_albums, artist['id'], offset=x, limit=10, include_groups='album, single, compilation')['items']]
+            artistAlbums += [album for album in cached_api_call(sp.artist_albums, artist['id'], offset=x, limit=10, include_groups='album, single, compilation')['items']]
     for album in artistAlbums:
         if not album['id'] in albums:
             artists = {}
