@@ -93,51 +93,40 @@ playlists['likedSongs'] = {
 
 for playlist in playlists:
     for song in playlists[playlist]['songs']:
-        if not song['album']['id'] in albums:
+        if song is None:
+            print(f"Skipping invalid track in playlist '{playlist}'")
+            continue
+
+        album = song.get('album')
+        if album is None:
+            print(f"Skipping track without album in playlist '{playlist}'")
+            continue
+
+        album_id = album.get('id')
+        if album_id is None:
+            print(f"Skipping album without ID in playlist '{playlist}'")
+            continue
+
+        if album_id not in albums:
             artists = {}
-            for artist in song['album']['artists']:
-                artists[artist['id']] = {
-                    "name": artist['name'],
-                    "id": artist['id']
-                }
-            if len(song['album']['images']) == 0:
+            for artist in album.get('artists', []):
+                if artist and artist.get('id'):
+                    artists[artist['id']] = {
+                        "name": artist['name'],
+                        "id": artist['id']
+                    }
+
+            if len(album.get('images', [])) == 0:
                 url = ""
             else:
-                url = song['album']['images'][0]['url']
-            albums[song['album']['id']] = {
-                "name": song['album']['name'],
+                url = album['images'][0]['url']
+
+            albums[album_id] = {
+                "name": album['name'],
                 "artists": artists,
-                "release": song['album']['release_date'],
-                "trackCount": song['album']['total_tracks'],
-                "cover": url,
-                "count": 1
+                "release": album['release_date'],
+                "image": url
             }
-        else:
-            albums[song['album']['id']]['count'] = albums[song['album']['id']]['count']+1
-
-print("fetching liked albums ...")
-totalLikedAlbums = (int)(api_call(sp.current_user_saved_albums,limit=50, offset=0)['total'])
-likedAlbums = []
-for x in range(0,totalLikedAlbums,50):
-    likedAlbums += api_call(sp.current_user_saved_albums, limit=50, offset=x)['items']
-    print(f"    ({x}/{totalLikedAlbums})")
-print(f"    ({totalLikedAlbums}/{totalLikedAlbums})")
-
-for album in likedAlbums:
-    if not album['album']['id'] in albums or 'songs' not in albums[album['album']['id']]:
-        artists = {}
-        for artist in album['album']['artists']:
-            artists[artist['id']] = {
-                "name": artist['name'],
-                "id": artist['id']
-            }
-        albums[album['album']['id']] = {
-            "name": album['album']['name'],
-            "artists": artists,
-            "release": album['album']['release_date'],
-            "trackCount": album['album']['total_tracks'],
-            "cover": album['album']['images'][0]['url']
-        }
 
 print("fetching followed artists ...")
 totalArtists = (api_call(sp.current_user_followed_artists, limit=20, after=None)['artists']['total'])
@@ -178,7 +167,7 @@ for artist in artists:
             }
 
 print("pickling Data")
-
+os.makedirs("pickle", exist_ok=True)
 with open('pickle/albums.pickle', 'wb') as handle:
     pickle.dump(albums, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
